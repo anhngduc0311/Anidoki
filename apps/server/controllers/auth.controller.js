@@ -9,10 +9,12 @@ import {
 } from '../services/auth.service.js';
 import { extractBearerToken } from '../middlewares/auth.middleware.js';
 
+const DEFAULT_GOOGLE_CLIENT_ID = '739880522118-tj5r9t5hsaffqhrm6j425af5qrfjal90.apps.googleusercontent.com';
+
 export const AuthController = {
   getAuthConfig(req, res) {
     res.json({
-      clientId: process.env.GOOGLE_CLIENT_ID || '680572592219-jovd5g5n9p9k5r1ok4p81cpu5sr4hiu9.apps.googleusercontent.com'
+      clientId: process.env.GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID
     });
   },
 
@@ -73,7 +75,7 @@ export const AuthController = {
   async loginGoogle(req, res) {
     try {
       const { credential, access_token } = req.body;
-      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientId = process.env.GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
       let profile = null;
 
       if (credential) {

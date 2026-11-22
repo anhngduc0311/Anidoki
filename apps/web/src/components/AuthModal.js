@@ -2,8 +2,19 @@ import { AniDokiAPI } from '../api.js';
 import { state } from '../store/state.js';
 import { showToast } from '../utils/ui.js';
 
-const GOOGLE_CLIENT_ID = '680572592219-jovd5g5n9p9k5r1ok4p81cpu5sr4hiu9.apps.googleusercontent.com';
+const DEFAULT_GOOGLE_CLIENT_ID = '739880522118-tj5r9t5hsaffqhrm6j425af5qrfjal90.apps.googleusercontent.com';
 let googleTokenClient = null;
+let googleClientIdPromise = null;
+let googleInitPromise = null;
+
+async function resolveGoogleClientId() {
+  if (!googleClientIdPromise) {
+    googleClientIdPromise = AniDokiAPI.getAuthConfig()
+      .then((config) => config?.clientId || DEFAULT_GOOGLE_CLIENT_ID)
+      .catch(() => DEFAULT_GOOGLE_CLIENT_ID);
+  }
+  return googleClientIdPromise;
+}
 
 export function updateUserUI() {
   const openLoginBtn = document.getElementById('open-login-btn');
@@ -66,7 +77,7 @@ export function updateUserUI() {
   }
 }
 
-export function initGoogleServices(onSuccess) {
+export async function initGoogleServices(onSuccess) {
   const resetGoogleBtn = () => {
     const btn = document.getElementById('google-login-btn');
     if (btn) {
@@ -75,57 +86,77 @@ export function initGoogleServices(onSuccess) {
     }
   };
 
-  if (window.google?.accounts?.oauth2) {
-    try {
-      googleTokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: 'email profile openid',
-        callback: async (tokenResponse) => {
-          try {
-            if (tokenResponse && tokenResponse.access_token) {
-              const res = await AniDokiAPI.googleLogin({ access_token: tokenResponse.access_token });
-              if (res.success && res.user) {
-                await onSuccess(res.user);
-              } else {
-                showToast(res.message || 'Đăng nhập Google thất bại');
-              }
-            }
-          } finally {
-            resetGoogleBtn();
-          }
-        }
-      });
-    } catch (err) {
-      console.warn('Google Token Client init error:', err);
-      resetGoogleBtn();
-    }
-  }
+  if (googleTokenClient) return googleTokenClient;
+  if (googleInitPromise) return googleInitPromise;
 
-  if (window.google?.accounts?.id) {
-    try {
-      google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: async (response) => {
-          try {
-            if (response && response.credential) {
-              const res = await AniDokiAPI.googleLogin({ credential: response.credential });
-              if (res.success && res.user) {
-                await onSuccess(res.user);
-              } else {
-                showToast(res.message || 'Đăng nhập Google thất bại');
+  googleInitPromise = (async () => {
+    const clientId = await resolveGoogleClientId();
+
+    if (window.google?.accounts?.oauth2) {
+      try {
+        googleTokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: 'email profile openid',
+          callback: async (tokenResponse) => {
+            try {
+              if (tokenResponse?.error) {
+                showToast(tokenResponse.error_description || 'Đăng nhập Google bị hủy hoặc gặp lỗi.');
+                return;
               }
+              if (tokenResponse && tokenResponse.access_token) {
+                const res = await AniDokiAPI.googleLogin({ access_token: tokenResponse.access_token });
+                if (res.success && res.user) {
+                  await onSuccess(res.user);
+                } else {
+                  showToast(res.message || 'Đăng nhập Google thất bại');
+                }
+              }
+            } finally {
+              resetGoogleBtn();
             }
-          } finally {
+          },
+          error_callback: () => {
             resetGoogleBtn();
           }
-        },
-        auto_select: false
-      });
-    } catch (err) {
-      console.warn('Google GSI init error:', err);
-      resetGoogleBtn();
+        });
+      } catch (err) {
+        console.warn('Google Token Client init error:', err);
+        resetGoogleBtn();
+      }
     }
-  }
+
+    if (window.google?.accounts?.id) {
+      try {
+        google.accounts.id.initialize({
+          client_id: clientId,
+          callback: async (response) => {
+            try {
+              if (response && response.credential) {
+                const res = await AniDokiAPI.googleLogin({ credential: response.credential });
+                if (res.success && res.user) {
+                  await onSuccess(res.user);
+                } else {
+                  showToast(res.message || 'Đăng nhập Google thất bại');
+                }
+              }
+            } finally {
+              resetGoogleBtn();
+            }
+          },
+          auto_select: false
+        });
+      } catch (err) {
+        console.warn('Google GSI init error:', err);
+        resetGoogleBtn();
+      }
+    }
+
+    return googleTokenClient;
+  })().finally(() => {
+    googleInitPromise = null;
+  });
+
+  return googleInitPromise;
 }
 
 export async function restoreUserSession() {
@@ -240,7 +271,7 @@ export function initLoginModal(callbacks = {}) {
   // Bấm Đăng nhập bằng Google
   googleBtn?.addEventListener('click', async () => {
     if (!googleTokenClient && window.google?.accounts?.oauth2) {
-      initGoogleServices(handleLoginSuccess);
+      await initGoogleServices(handleLoginSuccess);
     }
 
     if (googleTokenClient) {

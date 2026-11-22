@@ -376,7 +376,7 @@ export const AniDokiAPI = {
       const res = await fetch(`${API_BASE}/auth/config`);
       return await res.json();
     } catch {
-      return { clientId: '680572592219-jovd5g5n9p9k5r1ok4p81cpu5sr4hiu9.apps.googleusercontent.com' };
+      return { clientId: '739880522118-tj5r9t5hsaffqhrm6j425af5qrfjal90.apps.googleusercontent.com' };
     }
   },
 
