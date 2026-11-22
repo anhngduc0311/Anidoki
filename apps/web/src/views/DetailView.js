@@ -1,5 +1,5 @@
 import { publicAnimeId } from '../../../../shared/animeUrls.js';
-import { AniDokiAPI } from '../api.js';
+import { AniDokiAPI, fetchPublicCatalog } from '../api.js';
 import { state } from '../store/state.js';
 import { router } from '../router.js';
 import { showToast } from '../utils/ui.js';
@@ -109,6 +109,34 @@ export async function openAnimeDetail(animeId, pushRoute = true) {
 }
 
 async function loadSeasonSelector(anime, request) {
+  const seasons = anime.isMovie || anime.format === 'MOVIE' ? [] : [anime];
+  renderSeasonSelector(anime, { seasons, pending: true });
+
+  const path = `/api/anime/${encodeURIComponent(anime.id)}/related`;
+  const readRelated = async response => {
+    const result = await response.json();
+    if (!response.ok || !result.success || !Array.isArray(result.data?.seasons)) throw new Error();
+    return result.data;
+  };
+  try {
+    const response = await fetchPublicCatalog(`${path}?quick=1`, { signal: AbortSignal.timeout(8000) });
+    const preview = await readRelated(response);
+    if (request !== detailRequest) return;
+    renderSeasonSelector(anime, preview);
+
+    if (preview.pending) {
+      const fullResponse = await fetch(path, { signal: AbortSignal.timeout(25000) });
+      const related = await readRelated(fullResponse);
+      if (request === detailRequest) renderSeasonSelector(anime, related);
+    }
+  } catch {
+    if (request === detailRequest) {
+      document.getElementById('detail-season-status').textContent = 'Chưa kiểm tra được các mùa khác.';
+    }
+  }
+}
+
+function renderSeasonSelector(anime, { seasons, movies = [], pending = false }) {
   const section = document.getElementById('detail-seasons');
   const list = document.getElementById('detail-season-list');
   const status = document.getElementById('detail-season-status');
@@ -117,47 +145,36 @@ async function loadSeasonSelector(anime, request) {
   section.hidden = false;
   list.replaceChildren();
   movieList.replaceChildren();
-  movieSection.hidden = true;
-  status.textContent = 'Đang tìm các mùa của phim…';
-  try {
-    const response = await fetch(`/api/anime/${encodeURIComponent(anime.id)}/related`);
-    const result = await response.json();
-    if (request !== detailRequest) return;
-    if (!response.ok || !result.success || !Array.isArray(result.data?.seasons)) throw new Error();
-    const { seasons, movies = [] } = result.data;
-    status.textContent = seasons.length ? `${seasons.length} mùa · Chọn mùa để xem danh sách tập` : 'Chưa có mùa phim liên quan';
-    for (const season of seasons) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'season-option';
-      button.dataset.animeId = season.id;
-      button.textContent = `Mùa ${seasonNumber(season)}${season.year ? ` · ${season.year}` : ''}`;
-      button.title = `${season.title.vietnamese || season.title.english} · ${(season.sources || [{ source: season.source }]).map(s => providerLabel(s.source)).join(', ')}`;
-      button.setAttribute('aria-pressed', String(season.id === anime.id));
-      button.addEventListener('click', () => {
-        if (season.id === state.currentDetailAnime?.id) return;
-        router.navigate(`/anime/${season.id}`);
-      });
-      list.appendChild(button);
-    }
-    movieSection.hidden = movies.length === 0;
-    for (const movie of movies) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'season-option related-movie-option';
-      button.dataset.animeId = movie.id;
-      const name = movie.title.vietnamese || movie.title.english;
-      button.textContent = `${name}${movie.year ? ` · ${movie.year}` : ''}`;
-      button.title = (movie.sources || [{ source: movie.source }]).map(source => providerLabel(source.source)).join(', ');
-      button.setAttribute('aria-pressed', String(movie.id === anime.id || movie.sources?.some(source => source.id === anime.id)));
-      button.addEventListener('click', () => {
-        if (movie.id !== state.currentDetailAnime?.id) router.navigate(`/anime/${movie.id}`);
-      });
-      movieList.appendChild(button);
-    }
-  } catch {
-    if (request !== detailRequest) return;
-    status.textContent = 'Không tải được các mùa phim.';
+  status.textContent = pending ? 'Đang kiểm tra thêm mùa phim…' :
+    seasons.length ? `${seasons.length} mùa · Chọn mùa để xem danh sách tập` : 'Chưa có mùa phim liên quan';
+  for (const season of seasons) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'season-option';
+    button.dataset.animeId = season.id;
+    button.textContent = `Mùa ${seasonNumber(season)}${season.year ? ` · ${season.year}` : ''}`;
+    button.title = `${season.title.vietnamese || season.title.english} · ${(season.sources || [{ source: season.source }]).map(s => providerLabel(s.source)).join(', ')}`;
+    button.setAttribute('aria-pressed', String(season.id === anime.id));
+    button.addEventListener('click', () => {
+      if (season.id === state.currentDetailAnime?.id) return;
+      router.navigate(`/anime/${season.id}`);
+    });
+    list.appendChild(button);
+  }
+  movieSection.hidden = movies.length === 0;
+  for (const movie of movies) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'season-option related-movie-option';
+    button.dataset.animeId = movie.id;
+    const name = movie.title.vietnamese || movie.title.english;
+    button.textContent = `${name}${movie.year ? ` · ${movie.year}` : ''}`;
+    button.title = (movie.sources || [{ source: movie.source }]).map(source => providerLabel(source.source)).join(', ');
+    button.setAttribute('aria-pressed', String(movie.id === anime.id || movie.sources?.some(source => source.id === anime.id)));
+    button.addEventListener('click', () => {
+      if (movie.id !== state.currentDetailAnime?.id) router.navigate(`/anime/${movie.id}`);
+    });
+    movieList.appendChild(button);
   }
 }
 

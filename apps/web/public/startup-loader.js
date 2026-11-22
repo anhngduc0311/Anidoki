@@ -3,7 +3,7 @@
   const root = document.documentElement;
   root.classList.add('is-starting');
   let finished = false;
-  const timeout = window.setTimeout(finish, 15000);
+  const timeout = window.setTimeout(finish, 12000);
 
   function finish() {
     if (finished) return;

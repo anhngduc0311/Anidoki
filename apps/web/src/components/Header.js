@@ -1,5 +1,5 @@
 import { mergeGenreOptions } from '../../../../shared/genres.js';
-import { AniDokiAPI } from '../api.js';
+import { AniDokiAPI, fetchPublicCatalog } from '../api.js';
 import { state } from '../store/state.js';
 import { router } from '../router.js';
 import { showToast } from '../utils/ui.js';
@@ -158,7 +158,7 @@ export function initGenreDropdown() {
     loadingOptions = true;
     if (retryOptions) retryOptions.hidden = true;
     try {
-      const response = await fetch('/api/genre-options');
+      const response = await fetchPublicCatalog('/api/genre-options');
       const result = await response.json();
       if (!response.ok || !result.success || !Array.isArray(result.data)) throw new Error();
       renderGenreList(result.data);
@@ -211,7 +211,7 @@ export function initGenreDropdown() {
     status.textContent = 'Đang tìm anime…';
     try {
       const params = new URLSearchParams({ categories: selected.join(','), page: reset ? 1 : page + 1, limit: 12 });
-      const response = await fetch('/api/anime/by-genres?' + params);
+      const response = await fetchPublicCatalog('/api/anime/by-genres?' + params);
       const result = await response.json();
       if (request !== generation) return;
       if (!response.ok || !result.success || !Array.isArray(result.data)) throw new Error();

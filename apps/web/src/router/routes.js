@@ -19,7 +19,7 @@ export function registerRoutes() {
     .addRoute('/', async () => {
       switchView('view-home');
       setHomeSEO();
-      await ensureHomeLoaded();
+      await ensureHomeLoaded().complete;
       startSpotlightTimer();
     })
     .addRoute('/browse', (route) => {

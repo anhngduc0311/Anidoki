@@ -182,31 +182,12 @@ export async function authenticateLocalUser(usernameOrEmail, password) {
   }
 
   const clean = usernameOrEmail.trim().toLowerCase();
-  let user = await UserModel.findByIdOrEmail(clean);
-
-  if (clean === 'admin' || clean === 'admin@anidoki.com' || clean === 'admin@system.anidoki') {
-    if (password === 'admin123') {
-      const pwdHash = hashPassword('admin123');
-      user = await UserModel.upsertLocalAdmin({
-        id: 'admin',
-        name: 'Quản trị viên AniDoki',
-        email: 'admin@system.anidoki',
-        avatar: 'https://ui-avatars.com/api/?name=Admin&background=e50914&color=fff&bold=true',
-        passwordHash: pwdHash
-      });
-    } else {
-      throw new Error('Mật khẩu không chính xác.');
-    }
-  } else if (!user) {
+  const user = await UserModel.findByIdOrEmail(clean === 'admin@anidoki.com' ? 'admin' : clean);
+  if (!user) {
     throw new Error('Tài khoản không tồn tại.');
-  } else {
-    let valid = false;
-    if (user.password_hash) {
-      valid = verifyPassword(password, user.password_hash);
-    }
-    if (!valid) {
-      throw new Error('Mật khẩu không chính xác.');
-    }
+  }
+  if (!verifyPassword(password, user.password_hash)) {
+    throw new Error('Mật khẩu không chính xác.');
   }
 
   if (user.is_banned) {

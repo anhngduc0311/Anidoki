@@ -1,7 +1,11 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { kkRequest, mapMovie, relatedSeasons } from './kkphim.service.js';
 import { searchNguonc } from './nguonc.service.js';
-import { seriesKey, seriesTitle, seasonNumber, sameSeries } from '../../../shared/series.js';
+import { seriesTitle, seasonNumber, sameSeries } from '../../../shared/series.js';
 import { AdminAnimeModel } from '../models/adminAnime.model.js';
+import { cacheKey, remember } from './cache.service.js';
+
+const relatedLookups = new Map();
 
 export { sameSeries } from '../../../shared/series.js';
 
@@ -25,7 +29,7 @@ export async function allRelatedSeasons(anime) {
   return (await allRelatedTitles(anime)).seasons;
 }
 
-export async function allRelatedTitles(anime) {
+function relatedLookup(anime) {
   const searchKeywords = new Set();
   const rawKey = anime.seriesSearch || seriesTitle(anime.title?.english || anime.title?.vietnamese || '').replace(/\s*\([^)]*\)\s*$/u, '');
   if (rawKey && rawKey.length >= 3) searchKeywords.add(anime.isMovie ? franchiseTitle(rawKey) : rawKey);
@@ -36,18 +40,49 @@ export async function allRelatedTitles(anime) {
     }
   }
 
-  const results = await Promise.allSettled([
-    relatedSeasons(anime),
-    ...[...searchKeywords].map(async kw => {
-      const { searchAnime47 } = await import('./anime47.service.js');
-      return searchAnime47(kw);
-    }),
-    ...[...searchKeywords].map(kw => searchNguonc(kw)),
-    ...[...searchKeywords].map(kw => kkRequest('/v1/api/tim-kiem?keyword=' + encodeURIComponent(kw) + '&limit=64').then(res => (res.data?.items || []).map(mapMovie)).catch(() => [])),
-    ...(anime.seriesSearch === 'Honzuki' && anime.source === 'NguonC'
-      ? [kkRequest('/phim/co-nang-mot-sach').then(d => [mapMovie(d.movie)])] : [])
-  ]);
-  let candidates = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+  const keywords = [...searchKeywords];
+  const key = cacheKey(['related-titles', anime.id, anime.source, anime.isMovie, anime.title, keywords, anime.seriesSearch]);
+  const existing = relatedLookups.get(key);
+  if (existing) return existing;
+
+  const lookup = { results: [] };
+  lookup.complete = remember(key, async () => {
+    const requests = [
+      relatedSeasons(anime),
+      ...keywords.map(async keyword => {
+        const { searchAnime47 } = await import('./anime47.service.js');
+        return searchAnime47(keyword);
+      }),
+      ...keywords.map(keyword => searchNguonc(keyword)),
+      ...keywords.map(keyword => kkRequest('/v1/api/tim-kiem?keyword=' + encodeURIComponent(keyword) + '&limit=64')
+        .then(res => (res.data?.items || []).map(mapMovie))),
+      ...(anime.seriesSearch === 'Honzuki' && anime.source === 'NguonC'
+        ? [kkRequest('/phim/co-nang-mot-sach').then(d => [mapMovie(d.movie)])] : [])
+    ];
+    // Keep provider priority stable even when their responses arrive out of order.
+    await Promise.allSettled(requests.map(async (request, index) => {
+      lookup.results[index] = await request;
+    }));
+    return lookup.results.flat();
+  }, { freshMs: 60000, staleMs: 600000 }).finally(() => relatedLookups.delete(key));
+  relatedLookups.set(key, lookup);
+  return lookup;
+}
+
+export async function allRelatedTitles(anime, { quick = false } = {}) {
+  const lookup = relatedLookup(anime);
+  let complete;
+  if (quick) {
+    const timeout = new AbortController();
+    try {
+      complete = await Promise.race([lookup.complete, delay(1200, null, { signal: timeout.signal })]);
+    } finally {
+      timeout.abort();
+    }
+  } else {
+    complete = await lookup.complete;
+  }
+  let candidates = complete ?? lookup.results.flat();
   try {
     const overrides = await AdminAnimeModel.getAllAnimeOverrides();
     candidates = candidates.filter(item => !overrides.get(item.id)?.is_hidden);
@@ -55,7 +90,8 @@ export async function allRelatedTitles(anime) {
   const anchor = anime.isMovie ? candidates.find(item => !isRelatedMovie(item) && sameFranchise(anime, item)) : anime;
   return {
     seasons: anchor ? mergeSeasons(anchor, candidates.filter(item => !isRelatedMovie(item))) : [],
-    movies: mergeRelatedMovies(anime, candidates)
+    movies: mergeRelatedMovies(anime, candidates),
+    ...(quick && { pending: complete === null })
   };
 }
 

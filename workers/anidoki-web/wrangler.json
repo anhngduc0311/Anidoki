@@ -1,0 +1,8 @@
+{
+  "name": "anidoki-web",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-21",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [{ "pattern": "anidoki.com/*", "zone_name": "anidoki.com" }]
+}

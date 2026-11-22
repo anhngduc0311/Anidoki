@@ -1,6 +1,6 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   movieDetail,
-  relatedSeasons,
   listing,
   selectSpotlights,
   trendingCatalog,
@@ -66,14 +66,20 @@ export const CatalogController = {
     try {
       const page = Math.min(1000, Math.max(1, parseInt(req.query.page) || 1));
       const limit = Math.min(48, Math.max(1, parseInt(req.query.limit) || 24));
-      // Ưu tiên lấy danh sách phim mới cập nhật từ Anime47 API có phân trang
+      const deadline = new AbortController();
       try {
-        const result = await getAnime47LatestEpisodes(page, limit);
+        // Keep waiting requests short while Anime47 can finish and warm its cache.
+        const result = await Promise.race([
+          getAnime47LatestEpisodes(page, limit),
+          delay(2500, null, { signal: deadline.signal })
+        ]);
         if (Array.isArray(result?.items) && result.items.length > 0) {
           return res.json({ success: true, data: result.items, pagination: result.pagination, total: result.items.length });
         }
       } catch (a47Err) {
         console.warn('Anime47 Latest Fetch Notice, falling back to PhimAPI:', a47Err.message);
+      } finally {
+        deadline.abort();
       }
 
       // Dự phòng sang PhimAPI nếu Anime47 gặp sự cố kết nối
@@ -209,7 +215,7 @@ export const CatalogController = {
     try {
       const id = req.params.id;
       const detail = id.startsWith('anime47-') ? await anime47Detail(id) : await movieDetail(id);
-      send(res, await allRelatedTitles(detail));
+      send(res, await allRelatedTitles(detail, { quick: req.query.quick === '1' }));
     } catch (error) {
       res.status(502).json({ success: false, message: 'Không tải được phim liên quan.' });
     }

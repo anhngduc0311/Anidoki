@@ -1,4 +1,4 @@
-import { AniDokiAPI } from '../api.js';
+import { AniDokiAPI, fetchPublicCatalog } from '../api.js';
 import { state } from '../store/state.js';
 import { router } from '../router.js';
 import { showToast, formatTime } from '../utils/ui.js';
@@ -12,13 +12,18 @@ import { providerLabel } from '../utils/providers.js';
 
 // SPOTLIGHT HERO CAROUSEL
 // ==========================================
-let homeReady;
+let homeLoading;
 export function ensureHomeLoaded() {
-  if (!homeReady) {
+  if (!homeLoading) {
     initMovies();
-    homeReady = Promise.all([loadSpotlight(), loadCatalogs()]);
+    const spotlightReady = loadSpotlight();
+    const { recentReady, catalogsReady } = loadCatalogs();
+    homeLoading = {
+      recentReady,
+      complete: Promise.all([spotlightReady, catalogsReady])
+    };
   }
-  return homeReady;
+  return homeLoading;
 }
 
 export async function loadSpotlight() {
@@ -187,36 +192,30 @@ export function resetSpotlightTimer() {
 // ==========================================
 
 
-export async function loadCatalogs() {
+async function loadCatalogGrid(grid, buttons, load, render) {
+  grid.textContent = 'Đang tải danh sách phim…';
+  grid.setAttribute('aria-busy', 'true');
+  buttons.forEach(button => { button.disabled = true; });
   try {
-    const [trending, recent, seasonal, genres] = await Promise.all([
-      AniDokiAPI.getTrendingCatalog().catch(() => null),
-      AniDokiAPI.getRecentlyUpdated(24),
-      AniDokiAPI.getSeasonal(),
-      AniDokiAPI.getGenres()
-    ]);
-
-    state.trending = trending?.data || [];
-    state.trendingPagination = trending?.pagination || { page: 0, hasMore: true };
-    state.recent = recent || [];
-    state.seasonal = seasonal || [];
-    state.genres = genres || {};
-  } catch (err) {
-    console.error('Error loading catalogs from API:', err);
-    state.trending = [];
-    state.recent = [];
-    state.seasonal = [];
+    const result = await load();
+    grid.replaceChildren();
+    render(result);
+    if (!grid.children.length) grid.textContent = 'Chưa có dữ liệu phù hợp từ AniDoki.';
+  } catch (error) {
+    console.error('Không thể tải danh sách phim:', error);
+    grid.textContent = 'Không tải được danh sách phim. Vui lòng thử lại.';
+  } finally {
+    grid.removeAttribute('aria-busy');
+    buttons.forEach(button => { button.disabled = false; });
   }
+}
 
+function loadCatalogs() {
   // Trending Grid (2 hàng x 6 ô = 12 ô)
   const trendingGrid = document.getElementById('trending-grid');
-  trendingGrid.innerHTML = '';
-  groupSeries(state.trending).slice(0, 12).forEach(anime => trendingGrid.appendChild(renderCard(anime)));
 
   // Recent Grid (Hiển thị đầy đủ phim mới cập nhật từ Anime47)
   const recentGrid = document.getElementById('recent-grid');
-  recentGrid.innerHTML = '';
-  groupSeries(state.recent).forEach(anime => recentGrid.appendChild(renderCard(anime)));
 
   // Seasonal Grid (Anime Tâm lý & Tình cảm: sắp xếp năm mới nhất trước, 2 hàng x 6 ô = 12 ô)
   const seasonalGrid = document.getElementById('seasonal-grid');
@@ -225,12 +224,6 @@ export async function loadCatalogs() {
     const sorted = groupSeries(state.seasonal).sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0));
     (all ? sorted : sorted.slice(0, 12)).forEach(anime => seasonalGrid.appendChild(renderCard(anime)));
   };
-  renderSortedSeasonalGrid(false);
-
-  for (const id of ['trending-grid', 'recent-grid', 'seasonal-grid']) {
-    const grid = document.getElementById(id);
-    if (!grid.children.length) grid.textContent = 'Chưa có dữ liệu phù hợp từ AniDoki.';
-  }
   // 1. Trending controls
   const viewAllTrending = document.getElementById('view-all-trending');
   const moreTrending = document.getElementById('load-more-trending');
@@ -251,7 +244,7 @@ export async function loadCatalogs() {
       const result = await AniDokiAPI.getTrendingCatalog((state.trendingPagination?.page || 0) + 1);
       const existing = new Set(state.trending.map(seriesKey));
       const added = result.data.filter(item => !existing.has(seriesKey(item)));
-      if (!state.trending.length && added.length) trendingGrid.replaceChildren();
+      if (!trendingGrid.children.length && added.length) trendingGrid.replaceChildren();
       added.forEach(item => trendingGrid.appendChild(renderCard(item)));
       state.trending.push(...added);
       state.trendingPagination = result.pagination;
@@ -274,17 +267,18 @@ export async function loadCatalogs() {
   // 2. Recent controls
   const viewAllRecent = document.getElementById('view-all-recent');
   const more = document.getElementById('load-more-anime');
-  let recentPage = 1;
+  let recentPage = 0;
   const loadMoreRecent = async () => {
     if (!more) return;
     more.disabled = true;
     more.textContent = 'Đang tải...';
     try {
-      const response = await fetch('/api/anime/recently-updated?page=' + (recentPage + 1) + '&limit=24');
+      const response = await fetchPublicCatalog('/api/anime/recently-updated?page=' + (recentPage + 1) + '&limit=24');
       const data = await response.json();
       if (!response.ok || !data.success || !data.data?.length) throw new Error();
       recentPage++;
       state.recent.push(...data.data);
+      if (!recentGrid.children.length) recentGrid.replaceChildren();
       const groups = groupSeries(state.recent);
       const existing = new Map([...recentGrid.children].map(card => [card.dataset.seriesKey, card]));
       for (const anime of groups) {
@@ -305,7 +299,7 @@ export async function loadCatalogs() {
   // 3. Seasonal (Tâm lý & Tình cảm) controls - Luôn ưu tiên năm mới nhất trước
   const viewAllSeasonal = document.getElementById('view-all-seasonal');
   const loadMoreSeasonal = document.getElementById('load-more-seasonal');
-  let seasonalPage = 1;
+  let seasonalPage = 0;
   const loadMoreSeasonalFn = async () => {
     if (!loadMoreSeasonal) return;
     loadMoreSeasonal.disabled = true;
@@ -332,8 +326,32 @@ export async function loadCatalogs() {
   viewAllSeasonal?.addEventListener('click', () => {
     router.navigate('/browse?category=tam-ly,tinh-cam');
   });
-  renderGenreRails();
-  await loadContinueWatching();
+  const recentReady = loadCatalogGrid(recentGrid, [more].filter(Boolean), () => AniDokiAPI.getRecentlyUpdated(24), recent => {
+    state.recent = recent || [];
+    recentPage = state.recent.length ? 1 : 0;
+    groupSeries(state.recent).forEach(anime => recentGrid.appendChild(renderCard(anime)));
+  });
+
+  const catalogsReady = Promise.all([
+    loadCatalogGrid(trendingGrid, [moreTrending], () => AniDokiAPI.getTrendingCatalog(), trending => {
+      state.trending = trending.data;
+      state.trendingPagination = trending.pagination;
+      groupSeries(state.trending).slice(0, 12).forEach(anime => trendingGrid.appendChild(renderCard(anime)));
+      updateTrendingControls();
+    }),
+    recentReady,
+    loadCatalogGrid(seasonalGrid, [loadMoreSeasonal].filter(Boolean), () => AniDokiAPI.getSeasonal(), seasonal => {
+      state.seasonal = seasonal || [];
+      seasonalPage = state.seasonal.length ? 1 : 0;
+      renderSortedSeasonalGrid();
+    }),
+    AniDokiAPI.getGenres().then(genres => {
+      state.genres = genres || {};
+      renderGenreRails();
+    }),
+    loadContinueWatching()
+  ]);
+  return { recentReady, catalogsReady };
 }
 
 export function initMovies() {

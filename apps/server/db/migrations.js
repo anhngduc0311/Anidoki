@@ -276,14 +276,14 @@ export async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_audit_logs_target ON audit_logs(target_type, target_id);
     `);
 
-    // 15. Tài khoản quản trị viên cục bộ (admin / admin123)
+    // 15. Tài khoản quản trị viên cục bộ
     await client.query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
     `);
 
-    const salt = 'e4a28f80459c9d72213e00cf77821381';
-    const hash = crypto.scryptSync('admin123', salt, 64).toString('hex');
-    const pwdHash = `${salt}:${hash}`;
+    const adminPassword = process.env.ANIDOKI_LOCAL_ADMIN_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : 'admin123');
+    const salt = crypto.randomBytes(16).toString('hex');
+    const pwdHash = adminPassword ? `${salt}:${crypto.scryptSync(adminPassword, salt, 64).toString('hex')}` : null;
 
     await client.query(`
       INSERT INTO users (id, name, email, avatar, provider, role, password_hash, created_at, updated_at)

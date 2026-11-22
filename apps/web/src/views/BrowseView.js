@@ -1,4 +1,4 @@
-import { AniDokiAPI } from '../api.js';
+import { AniDokiAPI, fetchPublicCatalog } from '../api.js';
 import { router } from '../router.js';
 import { renderCard } from '../components/MovieCard.js';
 import { initBrowseFilters, syncBrowseFilters } from '../components/BrowseFilters.js';
@@ -32,7 +32,7 @@ export function initBrowseView() {
   renderSelectOptions(browseGenreOptions);
 
   // Default options and controls work immediately while fresh genres load.
-  void fetch('/api/genre-options', { signal: AbortSignal.timeout(8000) }).then(res => res.json()).then(json => {
+  void fetchPublicCatalog('/api/genre-options', { signal: AbortSignal.timeout(8000) }).then(res => res.json()).then(json => {
     if (json.success && Array.isArray(json.data)) {
       browseGenreOptions = json.data;
       renderSelectOptions(browseGenreOptions);

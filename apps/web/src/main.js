@@ -9,6 +9,7 @@ import {
   refreshWatchlistCount
 } from './components/Header.js';
 import {
+  ensureHomeLoaded,
   loadContinueWatching
 } from './views/HomeView.js';
 import { initDetailEvents } from './views/DetailView.js';
@@ -17,7 +18,6 @@ import { initBrowseView } from './views/BrowseView.js';
 import { initLibraryView } from './views/LibraryView.js';
 import { initHistoryView } from './views/HistoryView.js';
 import { initAdminView } from './views/AdminView.js';
-import { waitForStartupAssets } from './utils/startup.js';
 
 // ==========================================
 // STARTUP BOOTSTRAP
@@ -27,12 +27,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     registerRoutes();
     initHeader();
     initGenreDropdown();
-    await restoreUserSession();
-    await refreshWatchlistCount();
+    const sessionReady = restoreUserSession().then(refreshWatchlistCount);
     initDetailEvents();
     initPlayerControls();
     initReportModal();
-    await initBrowseView();
+    initBrowseView();
     initLibraryView();
     initHistoryView({
       onHistoryChanged: async () => {
@@ -53,9 +52,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     initAdminView();
 
-    // Kích hoạt route hiện tại trên URL
-    await router.handleRoute();
-    await waitForStartupAssets();
+    // The public home page can load while the account is being restored.
+    if (window.location.pathname === '/') {
+      const routeReady = router.handleRoute();
+      const { recentReady } = ensureHomeLoaded();
+      const backgroundReady = Promise.allSettled([routeReady, sessionReady]);
+      await recentReady;
+      window.finishStartupLoading?.();
+      const failure = (await backgroundReady).find(result => result.status === 'rejected');
+      if (failure) throw failure.reason;
+    } else {
+      window.finishStartupLoading?.();
+      await sessionReady;
+      if (!router.currentRoute) await router.handleRoute();
+    }
   } catch (error) {
     console.error('Không thể hoàn tất khởi tạo AniDoki:', error);
   } finally {

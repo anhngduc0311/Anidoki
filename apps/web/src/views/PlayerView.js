@@ -1,4 +1,4 @@
-import { AniDokiAPI } from '../api.js';
+import { AniDokiAPI, fetchPublicCatalog } from '../api.js';
 import { state } from '../store/state.js';
 import { router } from '../router.js';
 import { showToast, formatTime } from '../utils/ui.js';
@@ -275,7 +275,7 @@ async function renderSourceChoices(anime, episodeNumber) {
   };
   render([{ id: anime.id, source: anime.source || 'AniDoki' }]);
   try {
-    const response = await fetch(`/api/anime/${encodeURIComponent(anime.id)}/seasons`);
+    const response = await fetchPublicCatalog(`/api/anime/${encodeURIComponent(anime.id)}/seasons`);
     const result = await response.json();
     if (request !== sourceRequest || state.currentVideoAnime?.id !== anime.id) return;
     const season = result.data?.find(s => s.sources?.some(source => source.id === anime.id));

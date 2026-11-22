@@ -1,12 +1,37 @@
 // API Client - Giao tiếp với AniDoki Backend REST API
 const API_BASE = '/api';
+const CATALOG_WORKER = 'https://anidoki-web.akzan0311.workers.dev';
+
+export async function fetchPublicCatalog(path, { signal } = {}) {
+  if (globalThis.location?.origin !== 'https://anidoki.com') {
+    return fetch(path, { signal });
+  }
+
+  const primaryTimeout = AbortSignal.timeout(3500);
+  try {
+    const response = await fetch(path, {
+      signal: signal ? AbortSignal.any([signal, primaryTimeout]) : primaryTimeout,
+    });
+    if (response.headers.get('content-type')?.includes('json')) return response;
+    void response.body?.cancel().catch(() => {});
+  } catch (error) {
+    if (signal?.aborted) throw error;
+  }
+
+  signal?.throwIfAborted();
+  const fallbackTimeout = AbortSignal.timeout(10000);
+  return fetch(`${CATALOG_WORKER}${path}`, {
+    credentials: 'omit',
+    signal: signal ? AbortSignal.any([signal, fallbackTimeout]) : fallbackTimeout,
+  });
+}
 const browseCache = new Map();
 
 export const AniDokiAPI = {
   // 1. Catalog APIs
   async getSpotlight() {
     try {
-      const res = await fetch(`${API_BASE}/anime/spotlight`);
+      const res = await fetchPublicCatalog(`${API_BASE}/anime/spotlight`);
       const data = await res.json();
       return data.success ? data.data : [];
     } catch (err) {
@@ -17,7 +42,7 @@ export const AniDokiAPI = {
 
   async getTrending(limit = 12) {
     try {
-      const res = await fetch(`${API_BASE}/anime/trending?limit=${limit}`);
+      const res = await fetchPublicCatalog(`${API_BASE}/anime/trending?limit=${limit}`);
       const data = await res.json();
       return data.success ? data.data : [];
     } catch (err) {
@@ -28,7 +53,7 @@ export const AniDokiAPI = {
 
   async getTrendingCatalog(page = 1, limit = 12) {
     const params = new URLSearchParams({ page, limit });
-    const res = await fetch(`${API_BASE}/anime/trending?${params}`);
+    const res = await fetchPublicCatalog(`${API_BASE}/anime/trending?${params}`);
     const data = await res.json();
     if (!res.ok || !data.success || !Array.isArray(data.data)) throw new Error('Không tải được phim thịnh hành');
     return data;
@@ -36,7 +61,9 @@ export const AniDokiAPI = {
 
   async getRecentlyUpdated(limit = 24, page = 1) {
     try {
-      const res = await fetch(`${API_BASE}/anime/recently-updated?limit=${limit}&page=${page}`);
+      const res = await fetchPublicCatalog(`${API_BASE}/anime/recently-updated?limit=${limit}&page=${page}`, {
+        signal: AbortSignal.timeout(10000)
+      });
       const data = await res.json();
       return data.success ? data.data : [];
     } catch (err) {
@@ -47,7 +74,7 @@ export const AniDokiAPI = {
 
   async getSeasonal(page = 1) {
     try {
-      const res = await fetch(`${API_BASE}/anime/seasonal?page=${page}`);
+      const res = await fetchPublicCatalog(`${API_BASE}/anime/seasonal?page=${page}`);
       const data = await res.json();
       return data.success ? data.data : [];
     } catch (err) {
@@ -58,7 +85,7 @@ export const AniDokiAPI = {
 
   async getMovies(page = 1, limit = 12) {
     const params = new URLSearchParams({ page, limit });
-    const res = await fetch(`${API_BASE}/anime/movies?${params}`);
+    const res = await fetchPublicCatalog(`${API_BASE}/anime/movies?${params}`);
     const data = await res.json();
     if (!res.ok || !data.success || !Array.isArray(data.data)) throw new Error('Không tải được phim lẻ');
     return data;
@@ -66,7 +93,7 @@ export const AniDokiAPI = {
 
   async getGenres() {
     try {
-      const res = await fetch(`${API_BASE}/anime/genres`);
+      const res = await fetchPublicCatalog(`${API_BASE}/anime/genres`);
       const data = await res.json();
       return data.success ? data.data : {};
     } catch (err) {
@@ -87,7 +114,7 @@ export const AniDokiAPI = {
       const key = cleanParams.toString();
       const cached = browseCache.get(key);
       if (cached?.expires > Date.now()) return cached.data;
-      const res = await fetch(`${API_BASE}/browse?${key}`, { signal });
+      const res = await fetchPublicCatalog(`${API_BASE}/browse?${key}`, { signal });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.message || 'Lỗi tải danh sách phim');
       browseCache.delete(key);
@@ -104,7 +131,7 @@ export const AniDokiAPI = {
   // 2. Anime Detail & Episodes
   async getAnimeDetail(id) {
     try {
-      const res = await fetch(`${API_BASE}/anime/${id}`);
+      const res = await fetchPublicCatalog(`${API_BASE}/anime/${id}`);
       const data = await res.json();
       return data.success ? data.data : null;
     } catch (err) {
@@ -115,7 +142,7 @@ export const AniDokiAPI = {
 
   async getEpisodes(id) {
     try {
-      const res = await fetch(`${API_BASE}/anime/${id}/episodes`);
+      const res = await fetchPublicCatalog(`${API_BASE}/anime/${id}/episodes`);
       const data = await res.json();
       return data.success ? data.data : [];
     } catch (err) {
@@ -128,7 +155,7 @@ export const AniDokiAPI = {
   async search(query = '', filters = {}) {
     try {
       const params = new URLSearchParams({ q: query, ...filters });
-      const res = await fetch(`${API_BASE}/search?${params.toString()}`);
+      const res = await fetchPublicCatalog(`${API_BASE}/search?${params.toString()}`);
       const data = await res.json();
       return data.success ? data.data : [];
     } catch (err) {
@@ -764,7 +791,7 @@ export const AniDokiAPI = {
   // ==========================================
   async getHomepageConfig() {
     try {
-      const res = await fetch(`${API_BASE}/homepage/config`);
+      const res = await fetchPublicCatalog(`${API_BASE}/homepage/config`);
       return await res.json();
     } catch (err) {
       return { success: false, message: err.message };
@@ -773,7 +800,7 @@ export const AniDokiAPI = {
 
   async getPublicSettings() {
     try {
-      const res = await fetch(`${API_BASE}/settings`);
+      const res = await fetchPublicCatalog(`${API_BASE}/settings`);
       return await res.json();
     } catch (err) {
       return { success: false, message: err.message };
